@@ -14,6 +14,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "swift/Basic/FileTypes.h"
+#include "swift/Basic/OutputFileMap.h"
 #include "swift/Option/Options.h"
 #include "llvm/CAS/CASReference.h"
 #include "llvm/CAS/ObjectStore.h"
@@ -25,6 +27,7 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
 #include <llvm/ADT/SmallString.h>
+#include <set>
 #include <swift/Basic/Version.h>
 #include <swift/Frontend/CompileJobCacheKey.h>
 
@@ -82,6 +85,32 @@ static void assertNoCASID(llvm::cas::ObjectStore &CAS,
 }
 #endif
 
+/// The options that name supplementary output paths, and the types of the
+/// outputs. These are also the outputs a supplementary output file map can
+/// request. Outputs produced from diagnostics aren't cached; replay produces
+/// them from the cached diagnostics, so they don't affect the key.
+static const std::pair<unsigned, file_types::ID> SupplementaryOutputs[] = {
+    {options::OPT_emit_objc_header_path, file_types::TY_ClangHeader},
+    {options::OPT_emit_module_path, file_types::TY_SwiftModuleFile},
+    {options::OPT_emit_module_doc_path, file_types::TY_SwiftModuleDocFile},
+    {options::OPT_emit_dependencies_path, file_types::TY_Dependencies},
+    {options::OPT_emit_reference_dependencies_path, file_types::TY_SwiftDeps},
+    {options::OPT_serialize_diagnostics_path, file_types::TY_SerializedDiagnostics},
+    {options::OPT_emit_loaded_module_trace_path, file_types::TY_ModuleTrace},
+    {options::OPT_emit_tbd_path, file_types::TY_TBD},
+    {options::OPT_emit_module_interface_path, file_types::TY_SwiftModuleInterfaceFile},
+    {options::OPT_emit_private_module_interface_path, file_types::TY_PrivateSwiftModuleInterfaceFile},
+    {options::OPT_emit_package_module_interface_path, file_types::TY_PackageSwiftModuleInterfaceFile},
+    {options::OPT_emit_module_source_info_path, file_types::TY_SwiftSourceInfoFile},
+    {options::OPT_emit_module_summary_path, file_types::TY_SwiftModuleSummaryFile},
+    {options::OPT_emit_abi_descriptor_path, file_types::TY_SwiftABIDescriptor},
+    {options::OPT_emit_api_descriptor_path, file_types::TY_SwiftAPIDescriptor},
+    {options::OPT_emit_const_values_path, file_types::TY_ConstValues},
+    {options::OPT_emit_module_semantic_info_path, file_types::TY_ModuleSemanticInfo},
+    {options::OPT_sil_output_path, file_types::TY_SIL},
+    {options::OPT_ir_output_path, file_types::TY_LLVM_IR},
+};
+
 llvm::Expected<llvm::cas::ObjectRef> swift::createCompileJobBaseCacheKey(
     llvm::cas::ObjectStore &CAS, ArrayRef<const char *> Args) {
   // Don't count the `-frontend` in the first location since only frontend
@@ -106,6 +135,9 @@ llvm::Expected<llvm::cas::ObjectRef> swift::createCompileJobBaseCacheKey(
   SmallVector<llvm::cas::ObjectRef> CommandLineRefs;
   SmallVector<llvm::cas::ObjectRef> JobRefs;
   std::optional<unsigned> InputListRefIndex;
+  // Output paths don't affect the outputs, but which outputs are requested
+  // does: a cached result has to provide all of them.
+  std::set<std::string> RequestedOutputs;
 
   auto addFileList =
       [&](const llvm::opt::Arg *A, SmallVectorImpl<char> &Out,
@@ -173,8 +205,12 @@ llvm::Expected<llvm::cas::ObjectRef> swift::createCompileJobBaseCacheKey(
     const auto &Opt = Arg->getOption();
 
     // Skip the options that doesn't affect caching.
-    if (Opt.hasFlag(options::CacheInvariant))
+    if (Opt.hasFlag(options::CacheInvariant)) {
+      for (auto &[Option, Type] : SupplementaryOutputs)
+        if (Opt.getID() == Option && !file_types::isProducedFromDiagnostics(Type))
+          RequestedOutputs.insert(file_types::getTypeName(Type).str());
       continue;
+    }
 
     if (Opt.matches(options::OPT_Xcc)) {
       appendEntry(ClangArgs, EntryKind::Argument, Arg->getAsString(ParsedArgs));
@@ -241,6 +277,23 @@ llvm::Expected<llvm::cas::ObjectRef> swift::createCompileJobBaseCacheKey(
     }
 
     appendEntry(CommandLine, EntryKind::Argument, Arg->getAsString(ParsedArgs));
+  }
+
+  if (auto *A = ParsedArgs.getLastArg(options::OPT_supplementary_output_file_map)) {
+    auto Map = OutputFileMap::loadFromPath(A->getValue(), /*workingDirectory=*/"");
+    if (!Map)
+      return Map.takeError();
+    for (auto &InputOutputs : Map->getAllOutputMaps())
+      for (auto &[Option, Type] : SupplementaryOutputs)
+        if (InputOutputs.second.count(Type) &&
+            !file_types::isProducedFromDiagnostics(Type))
+          RequestedOutputs.insert(file_types::getTypeName(Type).str());
+  }
+  if (!RequestedOutputs.empty()) {
+    std::string Entry = "<requested-outputs>";
+    for (auto &Output : RequestedOutputs)
+      Entry += " " + Output;
+    appendEntry(CommandLine, EntryKind::Argument, Entry);
   }
 
   if (InputListRefIndex) {

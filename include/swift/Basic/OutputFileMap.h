@@ -43,6 +43,12 @@ public:
 
   ~OutputFileMap() = default;
 
+  /// The outputs of every input, including those of the single output, keyed
+  /// by input path.
+  const llvm::StringMap<TypeToPathMap> &getAllOutputMaps() const {
+    return InputToOutputsMap;
+  }
+
   /// Loads an OutputFileMap from the given \p Path into the receiver, if
   /// possible.
   static llvm::Expected<OutputFileMap>
