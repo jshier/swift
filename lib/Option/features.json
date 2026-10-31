@@ -65,6 +65,9 @@
     },
     {
        "name": "ipi-clang-module"
+    },
+    {
+       "name": "clang-modules-ignore-search-path"
     }
   ]
 }

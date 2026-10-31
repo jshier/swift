@@ -777,10 +777,13 @@ DiagnosticBehavior LangOptions::getAccessNoteFailureLimit() const {
 }
 
 namespace {
-  constexpr std::array<std::string_view, 16> knownSearchPathPrefiexes =
+  // `-fmodules-ignore-search-path=` names a search path, so it's remapped like
+  // one; it only matches the search path if it's spelled the same way.
+  constexpr std::array<std::string_view, 17> knownSearchPathPrefiexes =
        {"-I",
         "-F",
         "-fmodule-map-file=",
+        "-fmodules-ignore-search-path=",
         "-iquote",
         "-idirafter",
         "-iframeworkwithsysroot",
@@ -795,10 +798,14 @@ namespace {
         "-working-directory=",
         "-working-directory"};
 
-  constexpr std::array<std::string_view, 16>
+  // Search paths are dropped from Swift module dependencies' arguments, so a
+  // `-fmodules-ignore-search-path=` for one is meaningless there, and would
+  // only make the module's hash differ between clients.
+  constexpr std::array<std::string_view, 17>
       knownClangDependencyIgnorablePrefiexes = {"-I",
                                                 "-F",
                                                 "-fmodule-map-file=",
+                                                "-fmodules-ignore-search-path=",
                                                 "-ffile-compilation-dir",
                                                 "-iquote",
                                                 "-idirafter",
