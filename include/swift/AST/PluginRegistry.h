@@ -19,10 +19,42 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/Program.h"
 
+#include <memory>
 #include <mutex>
+#include <optional>
 #include "llvm/ADT/ArrayRef.h"
 
 namespace swift {
+
+/// An on-disk cache of a plugin's responses to macro expansion requests, shared
+/// by all frontend invocations that use the same cache directory.
+///
+/// Everything a plugin can observe is in the request, so a response is keyed
+/// by the request, the plugin's contents and the compiler version.
+class PluginResponseCache {
+  const std::string directory;
+
+  /// Hash of everything other than the request that identifies a response.
+  const std::string keyPrefix;
+
+  PluginResponseCache(llvm::StringRef directory, llvm::StringRef keyPrefix)
+      : directory(directory), keyPrefix(keyPrefix) {}
+
+  std::string getEntryPath(llvm::StringRef request) const;
+
+public:
+  /// Create a cache in \p directory for the plugin at \p pluginPath.
+  static llvm::Expected<std::unique_ptr<PluginResponseCache>>
+  create(llvm::StringRef directory, llvm::StringRef pluginPath);
+
+  llvm::StringRef getDirectory() const { return directory; }
+
+  /// The cached response to \p request, if any.
+  std::optional<std::string> lookup(llvm::StringRef request) const;
+
+  /// Cache \p response as the response to \p request. Failures are ignored.
+  void store(llvm::StringRef request, llvm::StringRef response) const;
+};
 
 /// Base class for compiler plugins, or plugin servers.
 class CompilerPlugin {
@@ -42,6 +74,9 @@ class CompilerPlugin {
 
   /// Flag to enable dumping of plugin messages.
   bool dumpMessaging = false;
+
+  /// Cache of the responses to macro expansion requests, if enabled.
+  std::unique_ptr<PluginResponseCache> responseCache;
 
 protected:
   CompilerPlugin(llvm::StringRef path) : path(path) {}
@@ -65,6 +100,11 @@ public:
   void setCapability(const void *newValue) { capability = newValue; };
 
   void setDumpMessaging(bool flag) { dumpMessaging = flag; }
+
+  PluginResponseCache *getResponseCache() const { return responseCache.get(); }
+  void setResponseCache(std::unique_ptr<PluginResponseCache> cache) {
+    responseCache = std::move(cache);
+  }
 
   virtual ~CompilerPlugin();
 

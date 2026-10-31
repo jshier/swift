@@ -476,6 +476,8 @@ bool ArgsToFrontendOptionsConverter::convert(
   }
 
   Opts.DisableSandbox = Args.hasArg(OPT_disable_sandbox);
+  if (const Arg *A = Args.getLastArg(OPT_macro_expansion_cache_path))
+    Opts.MacroExpansionCachePath = A->getValue();
 
   if (computeAvailabilityDomains())
     return true;

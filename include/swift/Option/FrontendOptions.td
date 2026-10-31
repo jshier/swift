@@ -520,6 +520,10 @@ def eager_macro_checking : Flag<["-"], "eager-macro-checking">,
 
 def dump_macro_expansions : Flag<["-"], "dump-macro-expansions">,
   HelpText<"Dumps the results of each macro expansion">;
+def macro_expansion_cache_path : Separate<["-"], "macro-expansion-cache-path">,
+  MetaVarName<"<path>">,
+  HelpText<"Cache the results of macro expansions by executable plugins in "
+           "<path>, and reuse them in other invocations">;
 def emit_macro_expansion_files : Separate<["-"], "emit-macro-expansion-files">,
   HelpText<"Specify when to emit macro expansion file: 'none', 'debug', or 'diagnostics'">;
 

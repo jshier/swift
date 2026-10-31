@@ -51,6 +51,9 @@ private:
   DependencyTracker *DepTracker;
   const bool disableSandbox;
 
+  /// The directory in which to cache macro expansions, if any.
+  const std::string macroExpansionCachePath;
+
   /// Map a module name to an plugin entry that provides the module.
   std::optional<llvm::DenseMap<swift::Identifier, PluginEntry>> PluginMap;
 
@@ -67,7 +70,8 @@ public:
   PluginLoader(ASTContext &Ctx, DependencyTracker *DepTracker,
                std::optional<std::vector<std::pair<std::string, std::string>>>
                    Remap = std::nullopt,
-               bool disableSandbox = false);
+               bool disableSandbox = false,
+               llvm::StringRef macroExpansionCachePath = {});
 
   void setRegistry(PluginRegistry *newValue);
   PluginRegistry *getRegistry();
@@ -98,6 +102,10 @@ public:
   /// NOTE: This method is idempotent. If the plugin is already loaded, the same
   /// instance is simply returned.
   llvm::Expected<CompilerPlugin *> loadExecutablePlugin(llvm::StringRef path);
+
+  /// Cache the results of the macro expansions by \p plugin, which was loaded
+  /// by 'loadExecutablePlugin()', if a cache directory was specified.
+  void setUpResponseCache(CompilerPlugin *plugin);
 
   /// Add the specified plugin associated with the module name to the dependency
   /// tracker if needed.

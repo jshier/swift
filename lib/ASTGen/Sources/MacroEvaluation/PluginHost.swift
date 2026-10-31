@@ -116,8 +116,8 @@ struct CompilerPlugin {
     return try body()
   }
 
-  private func sendMessage(_ message: HostToPluginMessage) throws {
-    let hadError = try JSON.encode(message).withUnsafeBufferPointer { (data) -> Bool in
+  private func sendMessage(_ request: [UInt8]) throws {
+    let hadError = request.withUnsafeBufferPointer { (data) -> Bool in
       return Plugin_sendMessage(opaqueHandle, BridgedData(baseAddress: data.baseAddress, count: data.count))
     }
     if hadError {
@@ -125,7 +125,10 @@ struct CompilerPlugin {
     }
   }
 
-  private func waitForNextMessage() throws -> PluginToHostMessage {
+  /// Wait for the next message, and pass it to `body` as JSON and decoded.
+  private func waitForNextMessage<R>(
+    _ body: (UnsafeBufferPointer<UInt8>, PluginToHostMessage) throws -> R
+  ) throws -> R {
     var result = BridgedData()
     let hadError = Plugin_waitForNextMessage(opaqueHandle, &result)
     defer { result.free() }
@@ -134,16 +137,55 @@ struct CompilerPlugin {
     }
     let data = UnsafeBufferPointer(start: result.baseAddress, count: result.count)
     return try data.withMemoryRebound(to: UInt8.self) { buffer in
-      try JSON.decode(PluginToHostMessage.self, from: buffer)
+      try body(buffer, try JSON.decode(PluginToHostMessage.self, from: buffer))
     }
   }
 
   func sendMessageAndWaitWithoutLock(_ message: HostToPluginMessage) throws -> PluginToHostMessage {
+    let request = try JSON.encode(message)
+    let isCacheable = message.isMacroExpansion && Plugin_hasResponseCache(opaqueHandle)
+    if isCacheable, let response = lookUpCachedResponse(to: request) {
+      return response
+    }
+
     guard !Plugin_spawnIfNeeded(opaqueHandle) else {
       throw PluginError.stalePlugin
     }
-    try sendMessage(message)
-    return try waitForNextMessage()
+    try sendMessage(request)
+    return try waitForNextMessage { (data, response) in
+      if isCacheable && response.isCacheableMacroExpansionResult {
+        storeCachedResponse(data, to: request)
+      }
+      return response
+    }
+  }
+
+  private func lookUpCachedResponse(to request: [UInt8]) -> PluginToHostMessage? {
+    var result = BridgedData()
+    let found = request.withUnsafeBufferPointer { request in
+      Plugin_lookUpCachedResponse(opaqueHandle, BridgedData(baseAddress: request.baseAddress, count: request.count), &result)
+    }
+    guard found else {
+      return nil
+    }
+    defer { result.free() }
+    let data = UnsafeBufferPointer(start: result.baseAddress, count: result.count)
+    // Treat an unreadable entry as a miss.
+    return data.withMemoryRebound(to: UInt8.self) { buffer in
+      try? JSON.decode(PluginToHostMessage.self, from: buffer)
+    }
+  }
+
+  private func storeCachedResponse(_ response: UnsafeBufferPointer<UInt8>, to request: [UInt8]) {
+    request.withUnsafeBufferPointer { request in
+      response.withMemoryRebound(to: CChar.self) { response in
+        Plugin_storeCachedResponse(
+          opaqueHandle,
+          BridgedData(baseAddress: request.baseAddress, count: request.count),
+          BridgedData(baseAddress: response.baseAddress, count: response.count)
+        )
+      }
+    }
   }
 
   func sendMessageAndWait(_ message: HostToPluginMessage) throws -> PluginToHostMessage {
@@ -450,5 +492,41 @@ extension PluginMessage.Syntax {
         column: 0
       )
     )
+  }
+}
+
+extension HostToPluginMessage {
+  /// Whether this is a request to expand a macro, whose response only depends
+  /// on the request.
+  fileprivate var isMacroExpansion: Bool {
+    switch self {
+    case .expandFreestandingMacro, .expandAttachedMacro:
+      return true
+    default:
+      return false
+    }
+  }
+}
+
+extension PluginToHostMessage {
+  /// Whether this is a successful macro expansion result. Failures aren't
+  /// cached, so that they're reported by the plugin each time.
+  fileprivate var isCacheableMacroExpansionResult: Bool {
+    let succeeded: Bool
+    let diagnostics: [PluginMessage.Diagnostic]
+    switch self {
+    case .expandMacroResult(let expandedSource, let _diagnostics):
+      succeeded = expandedSource != nil
+      diagnostics = _diagnostics
+    case .expandFreestandingMacroResult(let expandedSource, let _diagnostics):
+      succeeded = expandedSource != nil
+      diagnostics = _diagnostics
+    case .expandAttachedMacroResult(let expandedSources, let _diagnostics):
+      succeeded = expandedSources != nil
+      diagnostics = _diagnostics
+    default:
+      return false
+    }
+    return succeeded && !diagnostics.contains { $0.severity == .error }
   }
 }

@@ -350,8 +350,12 @@ CompilerPluginLoadRequest::evaluate(Evaluator &evaluator, ASTContext *ctx,
       plugin =
           initializePlugin(*ctx, plugin.get(), entry.libraryPath, moduleName);
     }
-    if (plugin)
+    if (plugin) {
+      // A plugin server's responses also depend on the library it loads.
+      if (entry.libraryPath.empty())
+        loader.setUpResponseCache(plugin.get());
       return plugin.get();
+    }
     llvm::handleAllErrors(plugin.takeError(),
                           [&](const llvm::ErrorInfoBase &err) {
                             if (!errorMessage.empty())

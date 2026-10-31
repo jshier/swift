@@ -27,8 +27,9 @@ using namespace swift;
 PluginLoader::PluginLoader(
     ASTContext &Ctx, DependencyTracker *DepTracker,
     std::optional<std::vector<std::pair<std::string, std::string>>> Remap,
-    bool disableSandbox)
-    : Ctx(Ctx), DepTracker(DepTracker), disableSandbox(disableSandbox) {
+    bool disableSandbox, StringRef macroExpansionCachePath)
+    : Ctx(Ctx), DepTracker(DepTracker), disableSandbox(disableSandbox),
+      macroExpansionCachePath(macroExpansionCachePath) {
   if (Remap && !Remap->empty()) {
     SmallVector<llvm::MappedPrefix, 4> prefixes;
     llvm::MappedPrefix::transformPairs(*Remap, prefixes);
@@ -298,6 +299,23 @@ PluginLoader::loadExecutablePlugin(StringRef path) {
   }
 
   return plugin;
+}
+
+void PluginLoader::setUpResponseCache(CompilerPlugin *plugin) {
+  if (macroExpansionCachePath.empty())
+    return;
+  if (auto *cache = plugin->getResponseCache())
+    if (cache->getDirectory() == macroExpansionCachePath)
+      return;
+
+  auto cache =
+      PluginResponseCache::create(macroExpansionCachePath, plugin->getPath());
+  if (!cache) {
+    // Expand without the cache.
+    llvm::consumeError(cache.takeError());
+    return;
+  }
+  plugin->setResponseCache(std::move(*cache));
 }
 
 void PluginLoader::recordDependency(const PluginEntry &plugin,

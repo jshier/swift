@@ -1062,7 +1062,8 @@ bool CompilerInstance::setUpPluginLoader() {
   auto loader = std::make_unique<PluginLoader>(
       *Context, getDependencyTracker(),
       Invocation.getFrontendOptions().CacheReplayPrefixMap,
-      Invocation.getFrontendOptions().DisableSandbox);
+      Invocation.getFrontendOptions().DisableSandbox,
+      Invocation.getFrontendOptions().MacroExpansionCachePath);
   Context->setPluginLoader(std::move(loader));
   return false;
 }

@@ -3512,6 +3512,18 @@ bool Plugin_sendMessage(PluginHandle handle, const BridgedData data);
 /// Receive a message from the plugin.
 bool Plugin_waitForNextMessage(PluginHandle handle, BridgedData *data);
 
+/// Whether the plugin's responses to macro expansion requests are cached.
+bool Plugin_hasResponseCache(PluginHandle handle);
+
+/// Look up the cached response to \p request. Returns true and sets \p data
+/// to a copy of the response, which the caller must free, if there is one.
+bool Plugin_lookUpCachedResponse(PluginHandle handle, const BridgedData request,
+                                 BridgedData *data);
+
+/// Cache \p response as the plugin's response to \p request.
+void Plugin_storeCachedResponse(PluginHandle handle, const BridgedData request,
+                                const BridgedData response);
+
 SWIFT_END_ASSUME_NONNULL
 
 SWIFT_END_NULLABILITY_ANNOTATIONS

@@ -18,8 +18,13 @@
 #include "swift/Basic/Program.h"
 #include "swift/Basic/Sandbox.h"
 #include "swift/Basic/StringExtras.h"
+#include "swift/Basic/Version.h"
+#include "llvm/ADT/StringExtras.h"
+#include "llvm/Support/BLAKE3.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Config/config.h"
 
@@ -35,6 +40,79 @@ using namespace swift;
 
 PluginRegistry::PluginRegistry() {
   dumpMessaging = ::getenv("SWIFT_DUMP_PLUGIN_MESSAGING") != nullptr;
+}
+
+/// Identifies the format of the response cache. Change it when the cached data
+/// or its key change.
+static constexpr llvm::StringLiteral PluginResponseCacheFormat =
+    "swift-plugin-response-cache-1";
+
+llvm::Expected<std::unique_ptr<PluginResponseCache>>
+PluginResponseCache::create(StringRef directory, StringRef pluginPath) {
+  auto plugin = llvm::MemoryBuffer::getFile(pluginPath, /*IsText=*/false,
+                                            /*RequiresNullTerminator=*/false);
+  if (!plugin)
+    return llvm::errorCodeToError(plugin.getError());
+
+  llvm::BLAKE3 hasher;
+  auto addComponent = [&](StringRef component) {
+    // Prefix each component with its size so that they can't run together.
+    llvm::support::ulittle64_t size(component.size());
+    hasher.update(llvm::ArrayRef<uint8_t>(
+        reinterpret_cast<const uint8_t *>(&size), sizeof(size)));
+    hasher.update(component);
+  };
+  addComponent(PluginResponseCacheFormat);
+  addComponent(version::getSwiftFullVersion());
+  addComponent((*plugin)->getBuffer());
+  return std::unique_ptr<PluginResponseCache>(new PluginResponseCache(
+      directory, llvm::toHex(hasher.final(), /*LowerCase=*/true)));
+}
+
+std::string PluginResponseCache::getEntryPath(StringRef request) const {
+  llvm::BLAKE3 hasher;
+  hasher.update(keyPrefix);
+  hasher.update(request);
+  std::string key = llvm::toHex(hasher.final(), /*LowerCase=*/true);
+  SmallString<128> path(directory);
+  llvm::sys::path::append(path, StringRef(key).take_front(2),
+                          StringRef(key).drop_front(2));
+  return std::string(path);
+}
+
+std::optional<std::string>
+PluginResponseCache::lookup(StringRef request) const {
+  auto response = llvm::MemoryBuffer::getFile(getEntryPath(request),
+                                              /*IsText=*/false,
+                                              /*RequiresNullTerminator=*/false);
+  if (!response)
+    return std::nullopt;
+  return (*response)->getBuffer().str();
+}
+
+void PluginResponseCache::store(StringRef request, StringRef response) const {
+  std::string path = getEntryPath(request);
+  if (llvm::sys::fs::create_directories(llvm::sys::path::parent_path(path)))
+    return;
+
+  // Write a unique file and rename it into place, so that concurrent readers
+  // never see a partial entry.
+  SmallString<128> tempPath;
+  int fd;
+  if (llvm::sys::fs::createUniqueFile(path + ".tmp-%%%%%%%%", fd, tempPath))
+    return;
+  {
+    llvm::raw_fd_ostream out(fd, /*shouldClose=*/true);
+    out << response;
+    out.close();
+    if (out.has_error()) {
+      out.clear_error();
+      llvm::sys::fs::remove(tempPath);
+      return;
+    }
+  }
+  if (llvm::sys::fs::rename(tempPath, path))
+    llvm::sys::fs::remove(tempPath);
 }
 
 CompilerPlugin::~CompilerPlugin() {

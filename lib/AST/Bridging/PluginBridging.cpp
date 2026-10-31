@@ -83,3 +83,33 @@ bool Plugin_waitForNextMessage(PluginHandle handle, BridgedData *out) {
   *out = BridgedData{(const char *)outPtr, size};
   return false;
 }
+
+bool Plugin_hasResponseCache(PluginHandle handle) {
+  auto *plugin = static_cast<CompilerPlugin *>(handle);
+  return plugin->getResponseCache() != nullptr;
+}
+
+bool Plugin_lookUpCachedResponse(PluginHandle handle, const BridgedData request,
+                                 BridgedData *out) {
+  auto *plugin = static_cast<CompilerPlugin *>(handle);
+  auto *cache = plugin->getResponseCache();
+  if (!cache)
+    return false;
+  auto response =
+      cache->lookup(StringRef(request.BaseAddress, request.Length));
+  if (!response)
+    return false;
+  auto size = response->size();
+  auto outPtr = malloc(size);
+  memcpy(outPtr, response->data(), size);
+  *out = BridgedData{(const char *)outPtr, size};
+  return true;
+}
+
+void Plugin_storeCachedResponse(PluginHandle handle, const BridgedData request,
+                                const BridgedData response) {
+  auto *plugin = static_cast<CompilerPlugin *>(handle);
+  if (auto *cache = plugin->getResponseCache())
+    cache->store(StringRef(request.BaseAddress, request.Length),
+                 StringRef(response.BaseAddress, response.Length));
+}
