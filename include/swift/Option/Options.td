@@ -2303,7 +2303,7 @@ def emit_module_separately:
 def no_emit_module_separately:
   Flag<["-"], "no-emit-module-separately">,
   Flags<[HelpHidden, NewDriverOnlyOption]>,
-  HelpText<"Force using merge-module as the incremental build mode">;
+  HelpText<"Obsolete and ignored: the merge-modules build mode was removed, so the module is always emitted by a separate job">;
 
 def emit_module_separately_WMO:
   Flag<["-"], "emit-module-separately-wmo">,
