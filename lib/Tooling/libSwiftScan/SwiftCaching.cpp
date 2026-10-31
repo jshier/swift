@@ -1044,16 +1044,21 @@ static llvm::Error replayCompilation(SwiftScanReplayInstance &Instance,
   ReplayOutputBackend Backend(
       makeIntrusiveRefCnt<llvm::vfs::OnDiskOutputBackend>(), Out);
 
-  if (!replayCachedCompilerOutputsForInput(
-          CAS, Comp.Output, Input, Comp.InputIndex, Inst.getDiags(),
-          Backend, Instance.Invocation.getFrontendOptions(), *CDP, Remarks,
-          UseCASBackend,
-          Instance.Invocation.getCASOptions().WriteOutputHashXAttr)) {
+  bool Replayed = replayCachedCompilerOutputsForInput(
+      CAS, Comp.Output, Input, Comp.InputIndex, Inst.getDiags(), Backend,
+      Instance.Invocation.getFrontendOptions(), *CDP, Remarks, UseCASBackend,
+      Instance.Invocation.getCASOptions().WriteOutputHashXAttr);
+  if (!Replayed)
     Inst.getDiags().diagnose(SourceLoc(), diag::cache_replay_failed,
                              "failed to load all outputs");
-  }
 
   Inst.getDiags().finishProcessing();
+
+  // The outputs weren't all written, so the client has to run the compilation
+  // instead.
+  if (!Replayed)
+    return createStringError(inconvertibleErrorCode(),
+                             "cache replay failed: failed to load all outputs");
   return llvm::Error::success();
 }
 

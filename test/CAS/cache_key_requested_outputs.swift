@@ -50,6 +50,17 @@
 // RUN:   -emit-dependencies-path %t/other.d -cas-path %t/cas @%t/MyApp.cmd 2>&1 | %FileCheck --check-prefix=CACHE-HIT %s
 // RUN: test -f %t/other.d
 
+/// libSwiftScan reports a replay that can't provide the requested outputs as a failure, so that the client compiles
+/// instead. Replay a result that has a dependencies file for a command line that doesn't request one.
+// RUN: %swift-scan-test -action compute_cache_key -cas-path %t/cas -input %t/a.swift -- \
+// RUN:   %target-swift-frontend-plain -cache-compile-job -primary-file %t/a.swift -c -o %t/a.o \
+// RUN:   -emit-dependencies-path %t/a.d -cas-path %t/cas @%t/MyApp.cmd > %t/deps-key.casid
+// RUN: not %swift-scan-test -action replay_result -cas-path %t/cas -id @%t/deps-key.casid -- \
+// RUN:   %target-swift-frontend-plain -cache-compile-job -primary-file %t/a.swift -c -o %t/a.o \
+// RUN:   -cas-path %t/cas @%t/MyApp.cmd 2>&1 | %FileCheck --check-prefix=REPLAY-FAILED %s
+
+// REPLAY-FAILED: cache replay failed: failed to load all outputs
+
 // CACHE-MISS-NOT: replay failed
 // CACHE-MISS: remark: cache miss for input
 // CACHE-MISS-NOT: replay failed
