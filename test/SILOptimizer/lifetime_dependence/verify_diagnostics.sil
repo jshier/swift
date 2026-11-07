@@ -38,6 +38,10 @@ public struct TrivialHolder {
 
 struct A {}
 
+struct NC : ~Copyable {
+  var c: C
+}
+
 struct NCWrapper : ~Copyable, ~Escapable {
   @_hasStorage let a: NE { get }
   deinit
@@ -56,6 +60,8 @@ sil @makeNE : $@convention(thin) () -> @lifetime(immortal) @owned NE
 sil @makeNEObject : $@convention(thin) () -> @lifetime(immortal) @owned NEObject
 sil @useNE : $@convention(thin) (@guaranteed NE) -> ()
 sil @reborrowNE : $@convention(thin) (@guaranteed NE) -> @lifetime(borrow 0) @owned NE
+sil @makeNC : $@convention(thin) () -> @owned NC
+sil @getNCNE : $@convention(thin) (@guaranteed NC) -> @lifetime(borrow 0) @owned NE
 
 sil @initHolder : $@convention(thin) () -> @out Holder
 sil @getNE : $@convention(thin) (@in_guaranteed Holder) -> @lifetime(borrow address_for_deps 0) @owned NE
@@ -509,6 +515,50 @@ bb2:
 
 bb3(%12 : @owned $Optional<@callee_guaranteed () -> ()>):
   destroy_value %12
+  %14 = tuple ()
+  return %14
+}
+
+// Test a dependence on the stack location of a noncopyable 'let' that AllocBoxToStack promoted from a box. The
+// location is singly initialized and only read by a load_borrow, so the dependent value's scope is the location's
+// initialized range, which covers the use.
+sil [ossa] @testDependenceOnLoadBorrowedLet : $@convention(thin) () -> () {
+bb0:
+  %0 = alloc_stack [lexical] [var_decl] $NC, let, name "nc"
+  %1 = function_ref @makeNC : $@convention(thin) () -> @owned NC
+  %2 = apply %1() : $@convention(thin) () -> @owned NC
+  store %2 to [init] %0
+  %4 = load_borrow %0
+  %5 = function_ref @getNCNE : $@convention(thin) (@guaranteed NC) -> @lifetime(borrow 0) @owned NE
+  %6 = apply %5(%4) : $@convention(thin) (@guaranteed NC) -> @lifetime(borrow 0) @owned NE
+  %7 = mark_dependence [unresolved] %6 on %0
+  end_borrow %4
+  %9 = function_ref @useNE : $@convention(thin) (@guaranteed NE) -> ()
+  %10 = apply %9(%7) : $@convention(thin) (@guaranteed NE) -> ()
+  destroy_value %7
+  destroy_addr %0
+  dealloc_stack %0
+  %14 = tuple ()
+  return %14
+}
+
+// Test that a use after the location is destroyed is still diagnosed.
+sil [ossa] @testDependenceOnLoadBorrowedLetOutOfScope : $@convention(thin) () -> () {
+bb0:
+  %0 = alloc_stack [lexical] [var_decl] $NC, let, name "nc" // expected-note {{it depends on the lifetime of this parent value}}
+  %1 = function_ref @makeNC : $@convention(thin) () -> @owned NC
+  %2 = apply %1() : $@convention(thin) () -> @owned NC
+  store %2 to [init] %0
+  %4 = load_borrow %0
+  %5 = function_ref @getNCNE : $@convention(thin) (@guaranteed NC) -> @lifetime(borrow 0) @owned NE
+  %6 = apply %5(%4) : $@convention(thin) (@guaranteed NC) -> @lifetime(borrow 0) @owned NE // expected-error {{lifetime-dependent value escapes its scope}}
+  %7 = mark_dependence [unresolved] %6 on %0
+  end_borrow %4
+  destroy_addr %0
+  %9 = function_ref @useNE : $@convention(thin) (@guaranteed NE) -> ()
+  %10 = apply %9(%7) : $@convention(thin) (@guaranteed NE) -> ()
+  destroy_value %7 // expected-note {{this use of the lifetime-dependent value is out of scope}}
+  dealloc_stack %0
   %14 = tuple ()
   return %14
 }

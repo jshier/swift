@@ -394,6 +394,10 @@ extension AddressInitializationWalker {
   }
 
   mutating func scopedAddressUse(of operand: Operand) -> WalkResult {
+    if operand.instruction is LoadBorrowInst {
+      // A borrow scope only reads the memory, like a `load`.
+      return onRead
+    }
     // AddressDefUseWalker currently skips most of these.
     return .abortWalk
   }
