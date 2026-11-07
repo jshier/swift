@@ -245,7 +245,7 @@ struct NEView: ~Escapable {
 
 // Noncopyable, but escapable. You get one from a non-escapable, but then not lifetime-bound.
 struct NC: ~Copyable {
-  x: Int
+  var x: Int
 }
 
 func consumeParent(_: consuming NCParent) {}
@@ -610,6 +610,6 @@ func testReassignFromNarrowerScope() {
 func testNonCopyableParent() {
   let parent = NCParent()
   let nc = parent.view.getNC()
-  _ = consumeParent(parent)
+  consumeParent(parent)
   _ = consume nc
 }
