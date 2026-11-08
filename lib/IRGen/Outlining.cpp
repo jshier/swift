@@ -549,8 +549,11 @@ llvm::Constant *IRGenModule::getOrCreateOutlinedCopyAddrHelperFunction(
 
 void TypeInfo::callOutlinedDestroy(IRGenFunction &IGF,
                                    Address addr, SILType T) const {
-  // Short-cut destruction of trivial values.
-  if (IGF.IGM.getTypeProperties(T).isTrivial())
+  // Short-cut destruction of trivial values, including non-Escapable values
+  // whose fields are all trivial: they are non-trivial only so that OSSA tracks
+  // their lifetime, and destroying them does nothing.
+  auto properties = IGF.IGM.getTypeProperties(T);
+  if (properties.isTrivial() || properties.isNonTrivialOnlyBecauseNonEscapable())
     return;
 
   if (withWitnessableMetadataCollector(
