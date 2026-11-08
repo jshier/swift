@@ -184,8 +184,14 @@ static bool expandDestroyAddr(DestroyAddrInst *dai) {
   // ARC optimizer which runs without ownership enabled.
   bool expand = shouldExpandShim(fn, type.getObjectType());
 
+  // A non-Escapable type whose fields are all trivial is non-trivial only so
+  // that OSSA tracks its lifetime. Without ownership, destroying it does
+  // nothing.
+  bool isTrivialWithoutOwnership =
+      !fn->hasOwnership() && type.isNonTrivialOnlyBecauseNonEscapable(*fn);
+
   // If we have a non-trivial type...
-  if (!type.isTrivial(*fn)) {
+  if (!type.isTrivial(*fn) && !isTrivialWithoutOwnership) {
     // If we have a type with reference semantics, emit a load/destroy.
     SILValue li = builder.emitLoadValueOperation(dai->getLoc(), addr,
                                                  LoadOwnershipQualifier::Take);

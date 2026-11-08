@@ -144,7 +144,11 @@ private extension UnaryInstruction {
   }
 
   func removeIfOperandIsTrivial(_ context: SimplifyContext) -> Bool {
-    if operand.value.isTrivial(context) {
+    // A non-Escapable type whose fields are all trivial is non-trivial only so that OSSA tracks its lifetime.
+    // retain_value and release_value only exist after OSSA lowering, where they do nothing for such a type.
+    if operand.value.isTrivial(context) ||
+       operand.value.type.isNonTrivialOnlyBecauseNonEscapable(in: parentFunction)
+    {
       context.erase(instruction: self)
       return true
     }

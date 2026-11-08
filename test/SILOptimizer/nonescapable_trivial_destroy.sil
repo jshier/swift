@@ -1,0 +1,108 @@
+// RUN: %target-sil-opt -sil-print-types -enable-sil-verify-all -enable-experimental-feature Lifetimes %s \
+// RUN:   -simplification -simplify-instruction=release_value | %FileCheck %s --check-prefix=RELEASE
+// RUN: %target-sil-opt -sil-print-types -enable-sil-verify-all -enable-experimental-feature Lifetimes %s \
+// RUN:   -simplification -simplify-instruction=retain_value | %FileCheck %s --check-prefix=RETAIN
+// RUN: %target-sil-opt -sil-print-types -enable-sil-verify-all -enable-experimental-feature Lifetimes %s \
+// RUN:   -lower-aggregate-instrs | %FileCheck %s --check-prefix=LOWER
+
+// REQUIRES: swift_feature_Lifetimes
+
+// A non-Escapable struct whose fields are all trivial is non-trivial only so that OSSA tracks its lifetime. Without
+// ownership, retaining, releasing or destroying it does nothing, however many fields it has (here, more than
+// LowerAggregateInstrs expands).
+
+sil_stage canonical
+
+import Swift
+import Builtin
+
+class C {}
+
+struct NonEscapableTrivial : ~Escapable {
+  let a: Builtin.Int64
+  let b: Builtin.Int64
+  let c: Builtin.Int64
+  let d: Builtin.Int64
+  let e: Builtin.Int64
+  let f: Builtin.Int64
+  let g: Builtin.Int64
+
+  @_lifetime(immortal)
+  init()
+}
+
+struct NonEscapableWithReference : ~Escapable {
+  let a: Builtin.Int64
+  let b: Builtin.Int64
+  let c: Builtin.Int64
+  let d: Builtin.Int64
+  let e: Builtin.Int64
+  let f: Builtin.Int64
+  let object: C
+
+  @_lifetime(immortal)
+  init()
+}
+
+// RELEASE-LABEL: sil @release_trivial :
+// RELEASE-NOT:     release_value
+// RELEASE:       } // end sil function 'release_trivial'
+sil @release_trivial : $@convention(thin) (@owned NonEscapableTrivial) -> () {
+bb0(%0 : $NonEscapableTrivial):
+  release_value %0 : $NonEscapableTrivial
+  %2 = tuple ()
+  return %2 : $()
+}
+
+// RELEASE-LABEL: sil @release_with_reference :
+// RELEASE:         release_value %0
+// RELEASE:       } // end sil function 'release_with_reference'
+sil @release_with_reference : $@convention(thin) (@owned NonEscapableWithReference) -> () {
+bb0(%0 : $NonEscapableWithReference):
+  release_value %0 : $NonEscapableWithReference
+  %2 = tuple ()
+  return %2 : $()
+}
+
+// RETAIN-LABEL: sil @retain_trivial :
+// RETAIN-NOT:     retain_value
+// RETAIN:       } // end sil function 'retain_trivial'
+sil @retain_trivial : $@convention(thin) (@guaranteed NonEscapableTrivial) -> () {
+bb0(%0 : $NonEscapableTrivial):
+  retain_value %0 : $NonEscapableTrivial
+  %2 = tuple ()
+  return %2 : $()
+}
+
+// RETAIN-LABEL: sil @retain_with_reference :
+// RETAIN:         retain_value %0
+// RETAIN:       } // end sil function 'retain_with_reference'
+sil @retain_with_reference : $@convention(thin) (@guaranteed NonEscapableWithReference) -> () {
+bb0(%0 : $NonEscapableWithReference):
+  retain_value %0 : $NonEscapableWithReference
+  %2 = tuple ()
+  return %2 : $()
+}
+
+// LOWER-LABEL: sil @destroy_addr_trivial :
+// LOWER-NOT:     load
+// LOWER-NOT:     release_value
+// LOWER-NOT:     destroy_addr
+// LOWER:       } // end sil function 'destroy_addr_trivial'
+sil @destroy_addr_trivial : $@convention(thin) (@in NonEscapableTrivial) -> () {
+bb0(%0 : $*NonEscapableTrivial):
+  destroy_addr %0 : $*NonEscapableTrivial
+  %2 = tuple ()
+  return %2 : $()
+}
+
+// LOWER-LABEL: sil @destroy_addr_with_reference :
+// LOWER:         [[V:%.*]] = load %0
+// LOWER:         release_value [[V]]
+// LOWER:       } // end sil function 'destroy_addr_with_reference'
+sil @destroy_addr_with_reference : $@convention(thin) (@in NonEscapableWithReference) -> () {
+bb0(%0 : $*NonEscapableWithReference):
+  destroy_addr %0 : $*NonEscapableWithReference
+  %2 = tuple ()
+  return %2 : $()
+}
