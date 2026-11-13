@@ -5083,6 +5083,7 @@ function Build-Build([Hashtable] $Platform,
       SwiftSystem_DIR = (Get-ProjectCMakeModules $Platform System);
       SwiftSubprocess_DIR = (Get-ProjectCMakeModules $Platform Subprocess);
       TSC_DIR = (Get-ProjectCMakeModules $Platform ToolsSupportCore);
+      SwiftCollections_DIR = (Get-ProjectCMakeModules $Platform Collections);
       SwiftToolsProtocols_DIR = (Get-ProjectCMakeModules $Platform ToolsProtocols);
       SQLite3_INCLUDE_DIR = "$SourceCache\swift-toolchain-sqlite\Sources\CSQLite\include";
       SQLite3_LIBRARY = if ($Platform.OS -eq [OS]::Windows) {
